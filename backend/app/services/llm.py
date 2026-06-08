@@ -25,13 +25,11 @@ def _parse_data_url(data_url: str) -> tuple[str, str]:
     return "image/png", data_url
 
 
-def ocr_image(image_data_url: str) -> str:
-    media_type, raw = _parse_data_url(image_data_url)
-    # 유효성 가벼운 확인
-    try:
-        _b64.b64decode(raw, validate=True)
-    except Exception:
-        pass
+_OCR_PROMPT = "이 이미지에 담긴 모든 텍스트와 정보를 빠짐없이 한국어로 추출해줘. 표/코드/UI도 구조를 살려 마크다운으로."
+
+
+def ocr_image_bytes(data: bytes, media_type: str) -> str:
+    raw = _b64.b64encode(data).decode()
     resp = client().messages.create(
         model=settings.anthropic_model,
         max_tokens=4096,
@@ -39,11 +37,21 @@ def ocr_image(image_data_url: str) -> str:
             "role": "user",
             "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": raw}},
-                {"type": "text", "text": "이 이미지에 담긴 모든 텍스트와 정보를 빠짐없이 한국어로 추출해줘. 표/코드/UI도 구조를 살려 마크다운으로."},
+                {"type": "text", "text": _OCR_PROMPT},
             ],
         }],
     )
     return "".join(b.text for b in resp.content if b.type == "text").strip()
+
+
+def ocr_image(image_data_url: str) -> str:
+    media_type, raw = _parse_data_url(image_data_url)
+    try:
+        return ocr_image_bytes(_b64.b64decode(raw), media_type)
+    except Exception:
+        # 이미 raw base64 가 깨졌을 경우 대비 — 원본 그대로 재시도
+        raw_bytes = raw.encode() if isinstance(raw, str) else raw
+        return ocr_image_bytes(raw_bytes, media_type)
 
 
 EXTRACT_TOOL = {

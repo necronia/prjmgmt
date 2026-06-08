@@ -3,7 +3,7 @@ import { Menu } from 'lucide-react'
 
 const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
   '/':        { title: 'Projects',  subtitle: '관리 중인 프로젝트 위키 목록' },
-  '/ingest':  { title: 'Ingest',    subtitle: '자연어·텍스트·이미지로 자료 추가' },
+  '/ingest':  { title: 'Ingest',    subtitle: '자연어·문서(PDF·PPT·Word·Excel)·이미지로 자료 추가' },
   '/search':  { title: 'Search',    subtitle: '자연어로 질문하고 근거와 함께 답을 받기' },
 }
 

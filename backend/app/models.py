@@ -7,12 +7,6 @@ class ProjectCreate(BaseModel):
     description: str | None = None
 
 
-class IngestRequest(BaseModel):
-    text: str | None = None
-    image_base64: str | None = None
-    project_slug: str | None = None
-
-
 class SearchRequest(BaseModel):
     query: str
     project_slug: str | None = None

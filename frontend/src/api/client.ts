@@ -68,8 +68,13 @@ export const projectsApi = {
 }
 
 export const ingestApi = {
-  submit: (payload: { text?: string; image_base64?: string; project_slug?: string }) =>
-    api.post<IngestResult>('/ingest', payload),
+  submit: (payload: { text?: string; project_slug?: string; files?: File[] }) => {
+    const fd = new FormData()
+    if (payload.text) fd.append('text', payload.text)
+    if (payload.project_slug) fd.append('project_slug', payload.project_slug)
+    for (const f of payload.files ?? []) fd.append('files', f, f.name)
+    return api.post<IngestResult[]>('/ingest', fd)
+  },
 }
 
 export const searchApi = {
