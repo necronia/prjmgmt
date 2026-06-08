@@ -1,0 +1,277 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────────────────────────────────────────────
+   AXGENTIC Design Tokens (CSS variables, RGB triples)
+   v1.9.3: 모든 색상을 RGB triple로 정의 → tailwind colors가
+   var(--ax-*) 참조 + alpha 변형 (/50 등) 동시 지원.
+   ThemeEditor에서 동적으로 수정 가능 + 모든 컴포넌트에 즉시 반영.
+   ─────────────────────────────────────────────────── */
+:root {
+  /* ── Surfaces (v1.9.57: darkness 비율 9/6.5/4/2/1 — 사용자 명시)
+       이전 균등 분포(10/8/6/4/2/1)는 사이트 전체 너무 어두움.
+       페이지는 살짝만 진하고, 안으로 갈수록 점프 폭 더 크게 → 빨리 밝아짐. */
+  --ax-bg:           232 235 240;  /* #E8EBF0 - depth 0 페이지 (darkness 9, 살짝만 보임) */
+  --ax-shell:        242 244 247;  /* #F2F4F7 - depth 1 (darkness 6.5, 큰 점프) */
+  --ax-panel:        247 249 251;  /* #F7F9FB - depth 2 (darkness 4, 또 점프) */
+  --ax-inner:        251 252 253;  /* #FBFCFD - depth 3 (darkness 2, 거의 흰색) */
+  --ax-surface:      255 255 255;  /* #FFFFFF - depth 4 (darkness 1, 흰색) */
+  --ax-subtle:       240 242 246;  /* #F0F2F6 - hover (shell과 panel 사이) */
+  /* 강조 마커용 (가장 작은 박스, 다시 어둡게) */
+  --ax-emphasis:     224 228 235;  /* #E0E4EB - 큰 숫자 marker 등 */
+
+  /* ── Borders ──────────────────────────────── */
+  --ax-border:       229 231 233;  /* #E5E7E9 - dribbble border */
+
+  /* ── Brand (v1.9.29: dribbble Follow 버튼 정확 매칭) ── */
+  --ax-accent:        57  68 232;  /* #3944E8 - Follow 버튼 */
+  --ax-accent2:      134  96 226;  /* #8660E2 - 차트 보라 */
+
+  /* ── Typography (charcoal, 절제) ───────────── */
+  --ax-text:          23  23  23;  /* #171717 - neutral-900 */
+  --ax-muted:        115 115 115;  /* #737373 - neutral-500 */
+
+  /* ── Semantic (v1.9.29: dribbble 차트 색 톤) ── */
+  --ax-success:       31 188 139;  /* #1FBC8B - vivid emerald (차트와 어울림) */
+  --ax-warning:      249 184  84;  /* #F9B854 - 차트 노랑 */
+  --ax-danger:       227  91  87;  /* #E35B57 - 차트 빨강 */
+
+  /* ── Chart palette (v1.9.29: dribbble stacked bar 5색) ── */
+  --ax-chart-1:      134  96 226;  /* #8660E2 purple */
+  --ax-chart-2:      227  91  87;  /* #E35B57 red */
+  --ax-chart-3:      249 184  84;  /* #F9B854 yellow */
+  --ax-chart-4:       83 145 224;  /* #5391E0 blue */
+  --ax-chart-5:      177 155 229;  /* #B19BE5 lilac (추정 — 보라 50% lightness) */
+
+  /* ── Pastel surfaces (Card variants) ───────── */
+  --ax-blue:         239 246 255;  /* #EFF6FF - blue-50 */
+  --ax-purple:       245 243 255;  /* #F5F3FF - violet-50 */
+  --ax-green:        236 253 245;  /* #ECFDF5 - emerald-50 */
+  --ax-amber:        255 251 235;  /* #FFFBEB - amber-50 */
+  --ax-rose:         255 241 242;  /* #FFF1F2 - rose-50 */
+
+  /* ── Typography metrics (사용자 편집 가능) ── */
+  --ax-base-size:    14px;     /* body font-size */
+  --ax-leading:      1.55;     /* line-height */
+  --ax-tracking:     0em;      /* letter-spacing */
+  --ax-radius:       0.875rem; /* v1.9.26: 14px — 살짝 더 둥글게 (dribbble 톤) */
+  --ax-card-pad:     1.375rem; /* v1.9.26: 22px — 여백 더 넉넉히 */
+  --ax-section-gap:  2rem;     /* 섹션 간 여백 */
+}
+
+/* body level — typography 토큰 적용 */
+body {
+  font-size: var(--ax-base-size);
+  line-height: var(--ax-leading);
+  letter-spacing: var(--ax-tracking);
+  /* v1.9.21: 한국어 CJK 단어 중간에서 끊기지 않도록 — 띄어쓰기 단위 줄바꿈.
+     긴 영문/URL은 자식에서 break-all/break-words로 override. */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+/* ───────────────────────────────────────────────────
+   Base
+   ─────────────────────────────────────────────────── */
+@layer base {
+  body {
+    @apply bg-ax-bg text-ax-text antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-ax-border rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--ax-muted) / 0.5);
+  }
+
+  h1, h2, h3, h4, h5 {
+    @apply text-ax-text font-semibold;
+  }
+}
+
+/* ───────────────────────────────────────────────────
+   Component Library — 화이트톤 + 절제된 액센트
+   ─────────────────────────────────────────────────── */
+@layer components {
+
+  /* ── Card / Panel (v1.9.28: 미세 shadow로 카드가 살짝 떠보이게 — dribbble 톤) ── */
+  .panel {
+    @apply bg-ax-panel border border-ax-border rounded-xl
+           shadow-[0_1px_2px_rgba(15,23,42,0.04)];
+  }
+  .panel-flat {
+    @apply bg-ax-panel border border-ax-border rounded-xl;
+  }
+  .panel-pastel {
+    @apply bg-ax-blue border border-ax-border rounded-xl;
+  }
+
+  /* ── Buttons (subtle, 명확한 hover) ── */
+  /* v1.9.19: whitespace-nowrap을 base .btn에 못박음 — 어떤 사용처에서도
+     아이콘과 라벨이 같은 줄에 머물도록 보장. 긴 라벨은 부모에서 처리. */
+  .btn {
+    @apply inline-flex items-center gap-2 font-medium rounded-lg whitespace-nowrap
+           transition-colors duration-150 select-none focus:outline-none
+           focus-visible:ring-2 focus-visible:ring-ax-accent/30;
+  }
+  .btn-sm  { @apply btn text-xs px-3 py-1.5; }
+  .btn-md  { @apply btn text-sm px-4 py-2; }
+  .btn-lg  { @apply btn text-sm px-5 py-2.5; }
+
+  .btn-primary {
+    @apply bg-ax-accent text-white
+           hover:opacity-90 active:opacity-95;
+  }
+  .btn-gradient {
+    @apply bg-gradient-ax text-white
+           hover:opacity-90 active:opacity-95;
+  }
+  .btn-secondary {
+    @apply bg-ax-panel border border-ax-border text-ax-text
+           hover:bg-ax-subtle hover:border-ax-text/30;
+  }
+  .btn-ghost {
+    @apply bg-transparent text-ax-muted
+           hover:text-ax-text hover:bg-ax-subtle;
+  }
+  .btn-danger {
+    @apply bg-ax-danger text-white
+           hover:opacity-90;
+  }
+  .btn-success {
+    @apply bg-ax-success text-white
+           hover:opacity-90;
+  }
+  .btn-disabled {
+    @apply opacity-40 pointer-events-none;
+  }
+
+  /* ── Badge (절제된 톤) ── */
+  /* v1.9.70: whitespace-nowrap — 좁은 모바일 화면에서 배지 라벨이
+     글자 단위(예: c/h/a/t)로 깨지지 않도록. 배지는 항상 한 줄. */
+  .badge {
+    @apply inline-flex items-center gap-1 text-[11px] font-medium
+           px-2 py-0.5 rounded-md whitespace-nowrap;
+  }
+  .badge-default  { @apply badge bg-ax-subtle text-ax-muted border border-ax-border; }
+  .badge-blue     { @apply badge bg-ax-blue text-ax-accent; }
+  .badge-purple   { @apply badge bg-ax-purple text-ax-accent2; }
+  .badge-green    { @apply badge bg-ax-green text-ax-success; }
+  .badge-amber    { @apply badge bg-ax-amber text-ax-warning; }
+  .badge-red      { @apply badge bg-ax-rose text-ax-danger; }
+  /* v1.9.30: border도 ax-* 토큰으로 (테마 변경 시 자동 반영) */
+  .badge-success  { @apply badge bg-ax-green text-ax-success border border-ax-success/25; }
+  .badge-warning  { @apply badge bg-ax-amber text-ax-warning border border-ax-warning/25; }
+  .badge-danger   { @apply badge bg-ax-rose text-ax-danger border border-ax-danger/25; }
+
+  /* ── Input ── */
+  .input {
+    @apply w-full bg-ax-panel border border-ax-border rounded-lg
+           px-3 py-2 text-sm text-ax-text placeholder:text-ax-muted
+           focus:outline-none focus:ring-2 focus:ring-ax-accent/20 focus:border-ax-accent
+           transition-colors duration-150;
+  }
+  .input-sm {
+    @apply input px-2.5 py-1.5 text-xs rounded-md;
+  }
+
+  /* ── Metric Card ── */
+  .metric-card {
+    @apply panel p-5 flex flex-col gap-1.5;
+  }
+  .metric-value {
+    @apply text-2xl font-semibold text-ax-text tabular-nums tracking-tight;
+  }
+  .metric-label {
+    @apply text-[11px] text-ax-muted font-medium uppercase tracking-wider;
+  }
+  .metric-trend-up   { @apply text-xs text-ax-success font-medium; }
+  .metric-trend-down { @apply text-xs text-ax-danger font-medium; }
+
+  /* ── Section header ── */
+  .section-header {
+    @apply flex items-center justify-between mb-4;
+  }
+  .section-title {
+    @apply text-sm font-semibold text-ax-text;
+  }
+  .section-subtitle {
+    @apply text-xs text-ax-muted mt-0.5;
+  }
+
+  /* ── Status dot ── */
+  .status-dot {
+    @apply w-2 h-2 rounded-full flex-shrink-0;
+  }
+  .status-dot-green   { @apply status-dot bg-ax-success; }
+  .status-dot-red     { @apply status-dot bg-ax-danger; }
+  .status-dot-amber   { @apply status-dot bg-ax-warning; }
+  .status-dot-blue    { @apply status-dot bg-ax-accent; }
+  .status-dot-pulse   { @apply animate-pulse; }
+
+  /* ── Page header ── */
+  .page-header {
+    @apply flex items-center justify-between mb-6;
+  }
+  .page-title {
+    @apply text-xl font-semibold text-ax-text tracking-tight;
+  }
+
+  /* ── Tabs ── */
+  .tab-bar {
+    @apply flex gap-1 p-1 bg-ax-subtle rounded-lg border border-ax-border;
+  }
+  .tab-item {
+    @apply flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md
+           transition-colors duration-150 cursor-pointer select-none;
+  }
+  .tab-active {
+    @apply bg-ax-panel text-ax-text font-medium shadow-sm;
+  }
+  .tab-inactive {
+    @apply text-ax-muted hover:text-ax-text;
+  }
+
+  /* ── Data row ── */
+  .data-row {
+    @apply flex items-center justify-between py-2.5
+           border-b border-ax-border last:border-0 text-sm;
+  }
+  .data-key   { @apply text-ax-muted; }
+  .data-value { @apply text-ax-text font-medium; }
+
+  /* ── Nav item ── */
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg
+           transition-colors duration-150 text-sm cursor-pointer;
+  }
+  .nav-item-active {
+    @apply nav-item bg-ax-subtle text-ax-text font-semibold
+           border border-ax-border;
+  }
+  .nav-item-inactive {
+    @apply nav-item text-ax-muted hover:text-ax-text hover:bg-ax-subtle;
+  }
+
+  /* ── Wiki markdown 본문 ── */
+  .prose-wiki h1 { @apply text-lg font-semibold mt-5 mb-2 first:mt-0; }
+  .prose-wiki h2 { @apply text-base font-semibold mt-5 mb-2 first:mt-0; }
+  .prose-wiki h3 { @apply text-sm font-semibold mt-4 mb-1.5; }
+  .prose-wiki p  { @apply my-2; }
+  .prose-wiki ul { @apply list-disc pl-5 my-2 space-y-1; }
+  .prose-wiki ol { @apply list-decimal pl-5 my-2 space-y-1; }
+  .prose-wiki a  { @apply text-ax-accent hover:underline; }
+  .prose-wiki code { @apply font-mono text-[0.85em] bg-ax-subtle px-1 py-0.5 rounded; }
+  .prose-wiki pre { @apply bg-ax-inner border border-ax-border rounded-lg p-3 my-3 overflow-x-auto; }
+  .prose-wiki pre code { @apply bg-transparent p-0; }
+  .prose-wiki blockquote { @apply border-l-2 border-ax-border pl-3 text-ax-muted my-2; }
+  .prose-wiki table { @apply w-full text-xs my-3 border-collapse; }
+  .prose-wiki th, .prose-wiki td { @apply border border-ax-border px-2 py-1 text-left; }
+  .prose-wiki th { @apply bg-ax-subtle font-medium; }
+  .prose-wiki hr { @apply border-ax-border my-4; }
+}

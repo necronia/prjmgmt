@@ -1,0 +1,30 @@
+# Caddy — 컨테이너 안에서 :80 listen. 정적 SPA + /api → backend 프록시.
+:80 {
+    root * /srv
+
+    handle /api/* {
+        reverse_proxy backend:8000 {
+            transport http {
+                read_timeout 5m
+                write_timeout 5m
+            }
+        }
+    }
+
+    handle /health {
+        reverse_proxy backend:8000
+    }
+
+    handle {
+        try_files {path} /index.html
+        file_server
+    }
+
+    encode gzip
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        -Server
+    }
+}

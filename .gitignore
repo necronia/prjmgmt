@@ -1,0 +1,19 @@
+# env / secrets
+.env
+.env.local
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# editor / os
+.DS_Store
+.idea/
+.vscode/

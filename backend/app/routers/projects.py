@@ -1,0 +1,83 @@
+from fastapi import APIRouter, HTTPException
+from slugify import slugify
+
+from ..core.db import get_conn
+from ..models import Project, ProjectCreate, ProjectDetail
+
+router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+
+def _proj_out(row) -> dict:
+    return {
+        "id": row["id"], "name": row["name"], "slug": row["slug"],
+        "description": row.get("description"),
+        "doc_count": row.get("doc_count"),
+        "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else "",
+    }
+
+
+@router.get("")
+def list_projects() -> list[Project]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT p.*, COUNT(d.id) AS doc_count
+               FROM projects p LEFT JOIN documents d ON d.project_id = p.id
+               GROUP BY p.id ORDER BY p.updated_at DESC"""
+        ).fetchall()
+    return [_proj_out(r) for r in rows]
+
+
+@router.post("")
+def create_project(body: ProjectCreate) -> Project:
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "이름이 비어 있습니다.")
+    base = slugify(name) or "project"
+    with get_conn() as conn:
+        slug, i = base, 2
+        while conn.execute("SELECT 1 FROM projects WHERE slug = %s", (slug,)).fetchone():
+            slug = f"{base}-{i}"; i += 1
+        row = conn.execute(
+            "INSERT INTO projects (name, slug, description) VALUES (%s, %s, %s) RETURNING *",
+            (name, slug, body.description),
+        ).fetchone()
+        conn.commit()
+    return {**_proj_out(row), "doc_count": 0}
+
+
+@router.get("/{slug}")
+def get_project(slug: str) -> ProjectDetail:
+    with get_conn() as conn:
+        project = conn.execute("SELECT * FROM projects WHERE slug = %s", (slug,)).fetchone()
+        if not project:
+            raise HTTPException(404, "프로젝트를 찾을 수 없습니다.")
+        pid = project["id"]
+        versions = conn.execute(
+            """SELECT id, title, content_md, source_type, occurred_on, supersedes_id, created_at
+               FROM documents WHERE project_id = %s ORDER BY created_at DESC""",
+            (pid,),
+        ).fetchall()
+        entities = conn.execute(
+            "SELECT id, name, type FROM entities WHERE project_id = %s ORDER BY name", (pid,)
+        ).fetchall()
+        rels = conn.execute(
+            """SELECT s.name AS subject, r.predicate, o.name AS object
+               FROM relations r
+               JOIN entities s ON s.id = r.subject_id
+               JOIN entities o ON o.id = r.object_id
+               WHERE r.project_id = %s""",
+            (pid,),
+        ).fetchall()
+
+    return ProjectDetail(
+        project=_proj_out({**project, "doc_count": len(versions)}),
+        versions=[{
+            "id": v["id"], "title": v["title"], "content_md": v["content_md"],
+            "source_type": v["source_type"],
+            "occurred_on": str(v["occurred_on"]) if v["occurred_on"] else None,
+            "supersedes_id": v["supersedes_id"],
+            "created_at": v["created_at"].isoformat(),
+        } for v in versions],
+        entities=[{"id": e["id"], "name": e["name"], "type": e["type"]} for e in entities],
+        relations=[{"subject": r["subject"], "predicate": r["predicate"], "object": r["object"]} for r in rels],
+    )
