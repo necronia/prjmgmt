@@ -20,8 +20,8 @@ def _proj_out(row) -> dict:
 def list_projects() -> list[Project]:
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT p.*, COUNT(d.id) AS doc_count
-               FROM projects p LEFT JOIN documents d ON d.project_id = p.id
+            """SELECT p.*, COUNT(r.id) AS doc_count
+               FROM projects p LEFT JOIN revisions r ON r.project_id = p.id
                GROUP BY p.id ORDER BY p.updated_at DESC"""
         ).fetchall()
     return [_proj_out(r) for r in rows]
@@ -52,9 +52,10 @@ def get_project(slug: str) -> ProjectDetail:
         if not project:
             raise HTTPException(404, "프로젝트를 찾을 수 없습니다.")
         pid = project["id"]
-        versions = conn.execute(
-            """SELECT id, title, content_md, source_type, occurred_on, supersedes_id, created_at
-               FROM documents WHERE project_id = %s ORDER BY created_at DESC""",
+        doc = conn.execute("SELECT * FROM documents WHERE project_id = %s", (pid,)).fetchone()
+        revs = conn.execute(
+            """SELECT id, summary, source_type, occurred_on, created_at
+               FROM revisions WHERE project_id = %s ORDER BY created_at DESC""",
             (pid,),
         ).fetchall()
         entities = conn.execute(
@@ -70,14 +71,18 @@ def get_project(slug: str) -> ProjectDetail:
         ).fetchall()
 
     return ProjectDetail(
-        project=_proj_out({**project, "doc_count": len(versions)}),
-        versions=[{
-            "id": v["id"], "title": v["title"], "content_md": v["content_md"],
-            "source_type": v["source_type"],
+        project=_proj_out({**project, "doc_count": 1 if doc else 0}),
+        document=({
+            "id": doc["id"], "title": doc["title"], "content_md": doc["content_md"],
+            "source_type": doc["source_type"],
+            "created_at": doc["created_at"].isoformat(),
+            "updated_at": doc["updated_at"].isoformat(),
+        } if doc else None),
+        revisions=[{
+            "id": v["id"], "summary": v["summary"], "source_type": v["source_type"],
             "occurred_on": str(v["occurred_on"]) if v["occurred_on"] else None,
-            "supersedes_id": v["supersedes_id"],
             "created_at": v["created_at"].isoformat(),
-        } for v in versions],
+        } for v in revs],
         entities=[{"id": e["id"], "name": e["name"], "type": e["type"]} for e in entities],
         relations=[{"subject": r["subject"], "predicate": r["predicate"], "object": r["object"]} for r in rels],
     )

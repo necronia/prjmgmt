@@ -164,25 +164,27 @@ export default function Ingest() {
         )}
       </div>
 
-      {/* 결과 (문서별 카드) */}
+      {/* 결과 (프로젝트별 카드) — 위키에 병합됨 + 이번 변경 요약 */}
       {results.map((result) => (
-        <div key={result.document.id} className="panel p-6 mb-4">
-          <div className="flex items-center justify-between mb-4">
+        <div key={result.project.id} className="panel p-6 mb-4">
+          <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="badge-green flex-shrink-0">추가됨</span>
-              <span className="badge-blue flex-shrink-0">{result.document.source_type}</span>
-              <span className="text-sm font-semibold text-ax-text truncate">{result.document.title}</span>
+              <span className="badge-green flex-shrink-0">위키 업데이트됨</span>
+              <span className="text-sm font-semibold text-ax-text truncate">{result.project.name}</span>
             </div>
             <Link to={`/projects/${result.project.slug}`} className="btn-ghost btn-sm flex-shrink-0">
-              {result.project.name} 위키로 <ArrowRight size={14} />
+              위키 보기 <ArrowRight size={14} />
             </Link>
           </div>
-          <article className="prose-wiki text-sm text-ax-text leading-relaxed">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.document.content_md}</ReactMarkdown>
-          </article>
+          <div className="panel-pastel p-3 mb-1">
+            <div className="text-xs text-ax-muted mb-1">이번에 반영된 변경</div>
+            <article className="prose-wiki text-sm text-ax-text leading-relaxed">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.change_summary}</ReactMarkdown>
+            </article>
+          </div>
           {result.entities.length > 0 && (
             <div className="mt-4 pt-4 border-t border-ax-border">
-              <div className="text-xs text-ax-muted mb-2">추출된 엔티티</div>
+              <div className="text-xs text-ax-muted mb-2">엔티티</div>
               <div className="flex flex-wrap gap-1.5">
                 {result.entities.map((e) => <span key={e.id} className="badge-purple">{e.name}</span>)}
               </div>

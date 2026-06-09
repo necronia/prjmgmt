@@ -23,18 +23,26 @@ export interface Relation {
   object: string
 }
 
-export interface DocVersion {
+export interface WikiDoc {
   id: number
   title: string
   content_md: string
   source_type: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Revision {
+  id: number
+  summary: string
+  source_type: string
   occurred_on: string | null
-  supersedes_id: number | null
   created_at: string
 }
 
 export interface IngestResult {
-  document: DocVersion
+  document: WikiDoc
+  change_summary: string
   project: Project
   entities: Entity[]
   relations: Relation[]
@@ -61,7 +69,8 @@ export const projectsApi = {
     api.post<Project>('/projects', { name, description }),
   get: (slug: string) => api.get<{
     project: Project
-    versions: DocVersion[]
+    document: WikiDoc | null
+    revisions: Revision[]
     entities: Entity[]
     relations: Relation[]
   }>(`/projects/${slug}`),

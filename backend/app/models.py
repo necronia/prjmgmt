@@ -34,18 +34,26 @@ class Relation(BaseModel):
     object: str
 
 
-class DocVersion(BaseModel):
+class WikiDoc(BaseModel):
     id: int
     title: str
     content_md: str
     source_type: str
+    created_at: str
+    updated_at: str
+
+
+class Revision(BaseModel):
+    id: int
+    summary: str
+    source_type: str
     occurred_on: str | None = None
-    supersedes_id: int | None = None
     created_at: str
 
 
 class IngestResult(BaseModel):
-    document: DocVersion
+    document: WikiDoc
+    change_summary: str
     project: Project
     entities: list[Entity]
     relations: list[Relation]
@@ -53,7 +61,8 @@ class IngestResult(BaseModel):
 
 class ProjectDetail(BaseModel):
     project: Project
-    versions: list[DocVersion]
+    document: WikiDoc | None = None
+    revisions: list[Revision]
     entities: list[Entity]
     relations: list[Relation]
 

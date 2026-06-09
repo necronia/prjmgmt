@@ -54,12 +54,10 @@ def run_search(req: SearchRequest) -> SearchResponse:
         fused = _rrf([r["id"] for r in vec_rows], [r["id"] for r in kw_rows])
         top_ids = sorted(fused, key=fused.get, reverse=True)[:k]
 
-        # 4) 문서 메타 + 버전 맥락 (이 문서를 supersede 하는 더 최신본이 있으면 outdated)
+        # 4) 문서 메타 (프로젝트당 단일 위키). 본문의 (YYYY-MM-DD 수정) 표기가 버전 맥락 역할.
         doc_ids = list({by_id[cid]["document_id"] for cid in top_ids})
         docs = conn.execute(
-            """SELECT d.id, d.title, d.content_md, d.occurred_on, d.created_at, d.supersedes_id,
-                      p.slug AS project_slug,
-                      EXISTS(SELECT 1 FROM documents n WHERE n.supersedes_id = d.id) AS is_outdated
+            """SELECT d.id, d.title, d.updated_at, d.created_at, p.slug AS project_slug
                FROM documents d JOIN projects p ON p.id = d.project_id
                WHERE d.id = ANY(%s)""",
             (doc_ids,),
@@ -74,10 +72,9 @@ def run_search(req: SearchRequest) -> SearchResponse:
             d = doc_map.get(ch["document_id"])
             if not d:
                 continue
-            when = str(d["occurred_on"]) if d["occurred_on"] else d["created_at"].date().isoformat()
-            status = "구버전(이후 업데이트됨)" if d["is_outdated"] else "최신"
+            updated = d["updated_at"].date().isoformat()
             context_blocks.append(
-                f"[#{d['id']}] 제목: {d['title']} | 날짜: {when} | 상태: {status}\n{ch['text']}"
+                f"[#{d['id']}] 위키: {d['title']} | 최종수정: {updated}\n{ch['text']}"
             )
 
         # 문서 단위 citation (중복 제거, 점수순)
@@ -90,7 +87,7 @@ def run_search(req: SearchRequest) -> SearchResponse:
             seen.add(d["id"])
             citations.append(Citation(
                 document_id=d["id"], title=d["title"],
-                occurred_on=str(d["occurred_on"]) if d["occurred_on"] else None,
+                occurred_on=d["updated_at"].date().isoformat(),
                 created_at=d["created_at"].isoformat(),
                 project_slug=d["project_slug"],
                 snippet=ch["text"][:240],

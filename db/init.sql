@@ -12,19 +12,31 @@ CREATE TABLE IF NOT EXISTS projects (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ── 문서(버전형 위키 엔트리, append-only) ────────────
+-- ── 문서(프로젝트당 1개의 살아있는 위키, in-place 갱신) ──
 CREATE TABLE IF NOT EXISTS documents (
-    id            SERIAL PRIMARY KEY,
-    project_id    INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    title         TEXT NOT NULL,
-    content_md    TEXT NOT NULL,
-    source_type   TEXT NOT NULL DEFAULT 'nl',   -- nl | paste | image
-    occurred_on   DATE,                          -- 내용상 사건 날짜
-    supersedes_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    id          SERIAL PRIMARY KEY,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    content_md  TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'nl',   -- 마지막 업데이트 소스: nl | paste | image | file
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (project_id)                        -- 프로젝트당 문서 1개 보장
 );
 CREATE INDEX IF NOT EXISTS idx_documents_project ON documents(project_id);
-CREATE INDEX IF NOT EXISTS idx_documents_supersedes ON documents(supersedes_id);
+
+-- ── 수정 이력(문서 갱신 1건당 1행, 날짜+요약) ──────────
+CREATE TABLE IF NOT EXISTS revisions (
+    id          SERIAL PRIMARY KEY,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    summary     TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'nl',
+    occurred_on DATE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_revisions_project ON revisions(project_id);
+CREATE INDEX IF NOT EXISTS idx_revisions_document ON revisions(document_id);
 
 -- ── 청크(검색 단위) ──────────────────────────────────
 CREATE TABLE IF NOT EXISTS chunks (

@@ -11,7 +11,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
   const location = useLocation()
   const params = useParams()
   const page = location.pathname.startsWith('/projects/')
-    ? { title: params.slug ?? 'Wiki', subtitle: '프로젝트 위키 — 버전 맥락 유지' }
+    ? { title: params.slug ?? 'Wiki', subtitle: '단일 위키 문서 — 수정 날짜로 업데이트 표시' }
     : (PAGE_TITLES[location.pathname] ?? { title: 'PrjMgmt', subtitle: '' })
 
   return (

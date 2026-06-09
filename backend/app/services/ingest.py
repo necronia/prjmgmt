@@ -1,7 +1,8 @@
-"""Ingest 파이프라인: 입력(텍스트/파일) → (파싱·OCR) → 구조화 추출 → 버전 문서 → 청크 임베딩 → 온톨로지.
+"""Ingest 파이프라인: 입력(텍스트/파일) → (파싱·OCR) → 기존 위키에 병합 → 재임베딩 → 수정이력 → 온톨로지.
 
-파일 여러 개를 한 번에 넣으면 각 파일이 하나의 위키 문서가 된다. 타이핑한 메모가 있으면
-각 파일에 컨텍스트로 덧붙는다(프로젝트 판단·요약에 활용). 파일이 없으면 메모 자체가 한 문서.
+프로젝트당 위키 문서는 1개. 새 입력은 그 문서에 병합되며, 변경/추가 사실엔 날짜가 표기된다.
+파일 여러 개를 넣으면 각각 해당 프로젝트 위키에 순차 병합되고, 매 입력마다 수정 이력 1건이 기록된다.
+타이핑한 메모는 각 파일에 컨텍스트로 덧붙는다. 결과는 영향받은 프로젝트별 1개.
 """
 from datetime import date
 
@@ -89,44 +90,55 @@ def run_ingest(text: str | None = None, files: list[FileInput] | None = None,
         raise ValueError("처리할 입력이 없습니다. 텍스트를 쓰거나 읽을 수 있는 파일을 첨부하세요.")
 
     today = date.today().isoformat()
-    results: list[IngestResult] = []
+    # 각 입력을 해당 프로젝트의 단일 위키 문서에 순차 병합. 영향받은 프로젝트별로 결과 1개.
+    affected: dict[int, dict] = {}
     with get_conn() as conn:
         for raw_text, source_type in items:
-            results.append(_ingest_one(conn, raw_text, source_type, project_slug, today))
-    return results
+            project, change_summary = _apply_update(conn, raw_text, source_type, project_slug, today)
+            info = affected.setdefault(project["id"], {"project": project, "changes": []})
+            info["changes"].append(change_summary)
+        conn.commit()
+        return [_build_result(conn, info["project"], info["changes"], today) for info in affected.values()]
 
 
-def _ingest_one(conn, raw_text: str, source_type: str, project_slug: str | None, today: str) -> IngestResult:
+def _apply_update(conn, raw_text: str, source_type: str, project_slug: str | None, today: str) -> tuple[dict, str]:
+    """입력을 프로젝트의 단일 위키에 병합하고 (project, change_summary) 반환."""
     known = [r["name"] for r in conn.execute("SELECT name FROM projects ORDER BY updated_at DESC").fetchall()]
-    hinted = None
+
     if project_slug:
-        p = conn.execute("SELECT name FROM projects WHERE slug = %s", (project_slug,)).fetchone()
-        hinted = p["name"] if p else None
+        prow = conn.execute("SELECT name FROM projects WHERE slug = %s", (project_slug,)).fetchone()
+        project = _resolve_project(conn, project_slug, (prow["name"] if prow else None) or "Untitled")
+        pre_doc = conn.execute("SELECT * FROM documents WHERE project_id = %s", (project["id"],)).fetchone()
+        merged = llm.merge(pre_doc["content_md"] if pre_doc else "", raw_text, known, today, project["name"])
+    else:
+        # 프로젝트 미지정: 1차 병합으로 프로젝트명 추정 → 기존 문서 있으면 그 본문으로 재병합
+        merged = llm.merge("", raw_text, known, today, None)
+        project = _resolve_project(conn, None, merged.get("project_name") or "Untitled")
+        pre_doc = conn.execute("SELECT * FROM documents WHERE project_id = %s", (project["id"],)).fetchone()
+        if pre_doc and pre_doc["content_md"].strip():
+            merged = llm.merge(pre_doc["content_md"], raw_text, known, today, project["name"])
 
-    # 2) 구조화 추출
-    ex = llm.extract(raw_text, known, today, hinted)
+    title = project["name"]
+    content_md = merged.get("content_md") or raw_text
+    occurred = (merged.get("occurred_on") or "").strip() or today
+    change_summary = (merged.get("change_summary") or "내용 업데이트").strip()
 
-    # 3) 프로젝트 귀속
-    project = _resolve_project(conn, project_slug, ex.get("project_name") or "Untitled")
+    # 단일 문서 upsert
+    if pre_doc:
+        doc = conn.execute(
+            """UPDATE documents SET content_md = %s, title = %s, source_type = %s, updated_at = now()
+               WHERE id = %s RETURNING *""",
+            (content_md, title, source_type, pre_doc["id"]),
+        ).fetchone()
+        conn.execute("DELETE FROM chunks WHERE document_id = %s", (doc["id"],))
+    else:
+        doc = conn.execute(
+            """INSERT INTO documents (project_id, title, content_md, source_type)
+               VALUES (%s, %s, %s, %s) RETURNING *""",
+            (project["id"], title, content_md, source_type),
+        ).fetchone()
 
-    # 4) 버전 문서 — 같은 제목의 최신 문서를 supersedes
-    title = (ex.get("title") or "Untitled").strip()
-    prev = conn.execute(
-        """SELECT id FROM documents
-           WHERE project_id = %s AND lower(title) = lower(%s)
-           ORDER BY created_at DESC LIMIT 1""",
-        (project["id"], title),
-    ).fetchone()
-    occurred = (ex.get("occurred_on") or "").strip() or None
-    content_md = ex.get("summary_md") or raw_text
-
-    doc = conn.execute(
-        """INSERT INTO documents (project_id, title, content_md, source_type, occurred_on, supersedes_id)
-           VALUES (%s, %s, %s, %s, %s, %s) RETURNING *""",
-        (project["id"], title, content_md, source_type, occurred, prev["id"] if prev else None),
-    ).fetchone()
-
-    # 5) 청크 임베딩 저장
+    # 청크 재임베딩
     chunks = _chunk(content_md)
     vectors = embed.embed_passages(chunks)
     for ch, vec in zip(chunks, vectors):
@@ -136,14 +148,17 @@ def _ingest_one(conn, raw_text: str, source_type: str, project_slug: str | None,
             (doc["id"], project["id"], ch, vlit),
         )
 
-    # 6) 온톨로지 upsert
-    ent_rows = []
-    for e in ex.get("entities", []):
-        eid = _upsert_entity(conn, project["id"], e["name"], e.get("type", "unknown"))
-        ent_rows.append({"id": eid, "name": e["name"].strip(), "type": e.get("type", "unknown")})
+    # 수정 이력 1건 기록
+    conn.execute(
+        """INSERT INTO revisions (project_id, document_id, summary, source_type, occurred_on)
+           VALUES (%s, %s, %s, %s, %s)""",
+        (project["id"], doc["id"], change_summary, source_type, occurred),
+    )
 
-    rel_rows = []
-    for r in ex.get("relations", []):
+    # 온톨로지 누적 upsert
+    for e in merged.get("entities", []):
+        _upsert_entity(conn, project["id"], e["name"], e.get("type", "unknown"))
+    for r in merged.get("relations", []):
         subj = _upsert_entity(conn, project["id"], r["subject"], "unknown")
         obj = _upsert_entity(conn, project["id"], r["object"], "unknown")
         conn.execute(
@@ -151,25 +166,35 @@ def _ingest_one(conn, raw_text: str, source_type: str, project_slug: str | None,
                VALUES (%s, %s, %s, %s, %s)""",
             (project["id"], subj, r["predicate"], obj, doc["id"]),
         )
-        rel_rows.append({"subject": r["subject"], "predicate": r["predicate"], "object": r["object"]})
 
-    # 7) 프로젝트 updated_at 갱신
     conn.execute("UPDATE projects SET updated_at = now() WHERE id = %s", (project["id"],))
-    conn.commit()
+    return project, change_summary
 
+
+def _build_result(conn, project: dict, changes: list[str], today: str) -> IngestResult:
+    doc = conn.execute("SELECT * FROM documents WHERE project_id = %s", (project["id"],)).fetchone()
+    ents = conn.execute(
+        "SELECT id, name, type FROM entities WHERE project_id = %s ORDER BY name", (project["id"],)
+    ).fetchall()
+    rels = conn.execute(
+        """SELECT s.name AS subject, r.predicate, o.name AS object
+           FROM relations r JOIN entities s ON s.id = r.subject_id JOIN entities o ON o.id = r.object_id
+           WHERE r.project_id = %s""",
+        (project["id"],),
+    ).fetchall()
     return IngestResult(
         document={
             "id": doc["id"], "title": doc["title"], "content_md": doc["content_md"],
             "source_type": doc["source_type"],
-            "occurred_on": str(doc["occurred_on"]) if doc["occurred_on"] else None,
-            "supersedes_id": doc["supersedes_id"],
             "created_at": doc["created_at"].isoformat(),
+            "updated_at": doc["updated_at"].isoformat(),
         },
+        change_summary=" / ".join(changes),
         project={
             "id": project["id"], "name": project["name"], "slug": project["slug"],
             "description": project.get("description"),
             "updated_at": (project["updated_at"].isoformat() if project.get("updated_at") else today),
         },
-        entities=ent_rows,
-        relations=rel_rows,
+        entities=[{"id": e["id"], "name": e["name"], "type": e["type"]} for e in ents],
+        relations=[{"subject": r["subject"], "predicate": r["predicate"], "object": r["object"]} for r in rels],
     )
