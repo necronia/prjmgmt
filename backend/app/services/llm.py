@@ -132,6 +132,66 @@ def merge(existing_md: str, new_text: str, known_projects: list[str], today: str
     raise RuntimeError("위키 병합 실패")
 
 
+ROUTE_TOOL = {
+    "name": "route_to_projects",
+    "description": "입력 내용을 프로젝트(회사/클라이언트/사업 건 단위)별로 분리한다.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "segments": {
+                "type": "array",
+                "description": "프로젝트별로 분리된 조각들. 서로 다른 회사/클라이언트/건은 각각 별도 segment.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "project_name": {
+                            "type": "string",
+                            "description": "이 조각이 속한 프로젝트 이름. 기존 목록에 명확히 해당하면 그 이름을 '정확히' 그대로, 아니면 구체적인 새 이름(회사/클라이언트명 등).",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "이 프로젝트에 해당하는 입력 내용. 원문에서 해당 부분을 추려 의미를 보존해 담는다.",
+                        },
+                    },
+                    "required": ["project_name", "content"],
+                },
+            },
+        },
+        "required": ["segments"],
+    },
+}
+
+
+def route(text: str, known_projects: list[str], today: str, max_tokens: int = 8192) -> list[dict]:
+    """입력을 프로젝트(회사/클라이언트/건)별 segment 로 분리. 서로 다른 주제는 절대 한 프로젝트로 안 묶는다."""
+    known = ", ".join(known_projects) if known_projects else "(없음)"
+    resp = client().messages.create(
+        model=settings.anthropic_model,
+        max_tokens=max_tokens,
+        tools=[ROUTE_TOOL],
+        tool_choice={"type": "tool", "name": "route_to_projects"},
+        system=(
+            "너는 입력 내용을 '프로젝트' 단위로 분류·분리한다. 프로젝트는 서로 다른 회사·클라이언트·사업 건을 뜻한다 "
+            "(예: 신한은행, SK온, SK가스, CSWind 는 각각 별개 프로젝트).\n"
+            "규칙:\n"
+            "1) 서로 다른 회사/클라이언트/건은 절대 한 프로젝트로 묶지 말고 각각 별도 segment 로 분리한다.\n"
+            "2) 같은 주제(같은 회사/건)의 내용은 하나의 segment 로 묶는다(과도 분할 금지).\n"
+            "3) 기존 프로젝트 목록에 명확히 해당하면 그 이름을 '정확히' 재사용한다. 아니면 구체적인 새 이름(회사/클라이언트명)을 쓴다.\n"
+            "4) 'inc', '기타', '일반', '회사', '프로젝트' 같은 모호한 포괄 이름은 절대 만들지 않는다.\n"
+            "5) 모회사 우산 아래라도 외부 클라이언트나 독립 계약 건은 별도 프로젝트로 분리한다."
+        ),
+        messages=[{
+            "role": "user",
+            "content": f"오늘 날짜: {today}\n기존 프로젝트: {known}\n\n=== 입력 ===\n{text}",
+        }],
+    )
+    for block in resp.content:
+        if block.type == "tool_use" and block.name == "route_to_projects":
+            segs = block.input.get("segments") or []
+            return [s for s in segs if (s.get("content") or "").strip()]
+    return [{"project_name": "Untitled", "content": text}]
+
+
 def synthesize(query: str, context: str) -> str:
     resp = client().messages.create(
         model=settings.anthropic_model,

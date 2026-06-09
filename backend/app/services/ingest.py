@@ -1,8 +1,9 @@
-"""Ingest 파이프라인: 입력(텍스트/파일) → (파싱·OCR) → 기존 위키에 병합 → 재임베딩 → 수정이력 → 온톨로지.
+"""Ingest 파이프라인: 입력(텍스트/파일) → (파싱·OCR) → 라우팅(프로젝트 분리) → 위키 병합 → 재임베딩 → 수정이력 → 온톨로지.
 
-프로젝트당 위키 문서는 1개. 새 입력은 그 문서에 병합되며, 변경/추가 사실엔 날짜가 표기된다.
-파일 여러 개를 넣으면 각각 해당 프로젝트 위키에 순차 병합되고, 매 입력마다 수정 이력 1건이 기록된다.
-타이핑한 메모는 각 파일에 컨텍스트로 덧붙는다. 결과는 영향받은 프로젝트별 1개.
+프로젝트 미지정 시 입력을 회사/클라이언트/건 단위로 '분리'(llm.route)해 각 프로젝트로 라우팅한다.
+하나의 입력에 여러 회사가 섞여 있으면 각각 별도 프로젝트로 나뉜다(서로 다른 주제를 한 곳에 안 묶음).
+프로젝트당 위키 문서는 1개. 라우팅된 조각은 해당 문서에 병합되며 변경/추가 사실엔 날짜가 표기되고 수정 이력 1건이 남는다.
+프로젝트를 명시(project_slug)하면 라우팅 없이 그 프로젝트로 직행한다. 결과는 영향받은 프로젝트별 1개.
 """
 from datetime import date
 
@@ -90,36 +91,39 @@ def run_ingest(text: str | None = None, files: list[FileInput] | None = None,
         raise ValueError("처리할 입력이 없습니다. 텍스트를 쓰거나 읽을 수 있는 파일을 첨부하세요.")
 
     today = date.today().isoformat()
-    # 각 입력을 해당 프로젝트의 단일 위키 문서에 순차 병합. 영향받은 프로젝트별로 결과 1개.
     affected: dict[int, dict] = {}
     with get_conn() as conn:
+        known = [r["name"] for r in conn.execute("SELECT name FROM projects ORDER BY updated_at DESC").fetchall()]
+        forced = conn.execute("SELECT * FROM projects WHERE slug = %s", (project_slug,)).fetchone() if project_slug else None
+
         for raw_text, source_type in items:
-            project, change_summary = _apply_update(conn, raw_text, source_type, project_slug, today)
-            info = affected.setdefault(project["id"], {"project": project, "changes": []})
-            info["changes"].append(change_summary)
+            # 프로젝트 지정이 없으면 입력을 회사/클라이언트/건 단위로 분리(라우팅)
+            if forced:
+                segments = [{"project_name": forced["name"], "content": raw_text}]
+            else:
+                segments = llm.route(raw_text, known, today)
+
+            for seg in segments:
+                content = (seg.get("content") or "").strip()
+                if not content:
+                    continue
+                project = forced or _resolve_project(conn, None, seg.get("project_name") or "Untitled")
+                change_summary = _merge_segment(conn, project, content, source_type, today)
+                known = list({*known, project["name"]})  # 같은 배치 후속 라우팅에 반영
+                info = affected.setdefault(project["id"], {"project": project, "changes": []})
+                info["changes"].append(change_summary)
+
         conn.commit()
         return [_build_result(conn, info["project"], info["changes"], today) for info in affected.values()]
 
 
-def _apply_update(conn, raw_text: str, source_type: str, project_slug: str | None, today: str) -> tuple[dict, str]:
-    """입력을 프로젝트의 단일 위키에 병합하고 (project, change_summary) 반환."""
-    known = [r["name"] for r in conn.execute("SELECT name FROM projects ORDER BY updated_at DESC").fetchall()]
-
-    if project_slug:
-        prow = conn.execute("SELECT name FROM projects WHERE slug = %s", (project_slug,)).fetchone()
-        project = _resolve_project(conn, project_slug, (prow["name"] if prow else None) or "Untitled")
-        pre_doc = conn.execute("SELECT * FROM documents WHERE project_id = %s", (project["id"],)).fetchone()
-        merged = llm.merge(pre_doc["content_md"] if pre_doc else "", raw_text, known, today, project["name"])
-    else:
-        # 프로젝트 미지정: 1차 병합으로 프로젝트명 추정 → 기존 문서 있으면 그 본문으로 재병합
-        merged = llm.merge("", raw_text, known, today, None)
-        project = _resolve_project(conn, None, merged.get("project_name") or "Untitled")
-        pre_doc = conn.execute("SELECT * FROM documents WHERE project_id = %s", (project["id"],)).fetchone()
-        if pre_doc and pre_doc["content_md"].strip():
-            merged = llm.merge(pre_doc["content_md"], raw_text, known, today, project["name"])
+def _merge_segment(conn, project: dict, content: str, source_type: str, today: str) -> str:
+    """확정된 프로젝트의 단일 위키에 content 를 병합하고 change_summary 반환."""
+    pre_doc = conn.execute("SELECT * FROM documents WHERE project_id = %s", (project["id"],)).fetchone()
+    merged = llm.merge(pre_doc["content_md"] if pre_doc else "", content, [project["name"]], today, project["name"])
 
     title = project["name"]
-    content_md = merged.get("content_md") or raw_text
+    content_md = merged.get("content_md") or content
     occurred = (merged.get("occurred_on") or "").strip() or today
     change_summary = (merged.get("change_summary") or "내용 업데이트").strip()
 
@@ -168,7 +172,7 @@ def _apply_update(conn, raw_text: str, source_type: str, project_slug: str | Non
         )
 
     conn.execute("UPDATE projects SET updated_at = now() WHERE id = %s", (project["id"],))
-    return project, change_summary
+    return change_summary
 
 
 def _build_result(conn, project: dict, changes: list[str], today: str) -> IngestResult:
