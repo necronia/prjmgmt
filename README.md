@@ -55,6 +55,17 @@ uvicorn app.main:app --reload --port 8000
 cd frontend && npm install && npm run dev   # http://localhost:5173 (/api 는 8000으로 프록시)
 ```
 
+## 데이터 보존 (중요)
+
+- 데이터는 Docker named volume `prjmgmt_pgdata` 에 영구 저장된다. `docker compose up/down`, 이미지 재빌드, 코드 업그레이드에도 **데이터는 유지된다**.
+- 스키마가 바뀌어도 **볼륨을 지우지 않는다**. 백엔드가 기동 시 idempotent 마이그레이션(`app/core/migrate.py`)으로 기존 데이터를 보존한 채 스키마만 맞춘다(테이블/컬럼/인덱스 '있으면 통과, 없으면 추가').
+- ⚠️ `docker compose down -v` 나 `docker volume rm prjmgmt_pgdata` 는 데이터를 삭제하므로 쓰지 말 것.
+- 백업/복원:
+  ```bash
+  ./scripts/backup.sh                 # backups/prjmgmt-<날짜>.sql 로 덤프
+  ./scripts/restore.sh backups/xxx.sql
+  ```
+
 ## 데이터 모델
 
 | 테이블 | 역할 |

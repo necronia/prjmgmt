@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .core import migrate
 from .core.config import settings
 from .routers import ingest, projects, search
 from .services import embed
@@ -26,6 +27,13 @@ app.include_router(search.router)
 
 @app.on_event("startup")
 def _startup():
+    # 스키마 마이그레이션 (idempotent, 데이터 보존). 볼륨을 지우지 않고 스키마만 맞춘다.
+    try:
+        log.info("스키마 마이그레이션 적용…")
+        migrate.run()
+    except Exception as e:  # noqa: BLE001
+        log.error("마이그레이션 실패: %s", e)
+
     # 임베딩 모델 미리 로드 (최초 요청 지연 방지). 실패해도 기동은 계속.
     try:
         log.info("임베딩 모델 로딩…")

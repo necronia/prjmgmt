@@ -13,6 +13,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# db backups
+backups/
+
 # editor / os
 .DS_Store
 .idea/
