@@ -2,7 +2,10 @@ from fastapi import APIRouter, HTTPException
 from slugify import slugify
 
 from ..core.db import get_conn
-from ..models import Project, ProjectCreate, ProjectDetail
+from ..models import (
+    ConversationalEditRequest, IngestResult, ManualEditRequest, Project, ProjectCreate, ProjectDetail,
+)
+from ..services import ingest as ingest_service
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -74,6 +77,7 @@ def get_project(slug: str) -> ProjectDetail:
         project=_proj_out({**project, "doc_count": 1 if doc else 0}),
         document=({
             "id": doc["id"], "title": doc["title"], "content_md": doc["content_md"],
+            "meta": doc["meta"], "categories": doc["categories"],
             "source_type": doc["source_type"],
             "created_at": doc["created_at"].isoformat(),
             "updated_at": doc["updated_at"].isoformat(),
@@ -86,3 +90,26 @@ def get_project(slug: str) -> ProjectDetail:
         entities=[{"id": e["id"], "name": e["name"], "type": e["type"]} for e in entities],
         relations=[{"subject": r["subject"], "predicate": r["predicate"], "object": r["object"]} for r in rels],
     )
+
+
+@router.put("/{slug}/document")
+def edit_document(slug: str, body: ManualEditRequest):
+    """수동 편집 — 본문/메타를 직접 저장. 카테고리·온톨로지·검색 인덱스 재반영."""
+    try:
+        ingest_service.manual_edit(slug, body.content_md, [m.model_dump() for m in body.meta])
+        return {"ok": True}
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"수정 실패: {e}")
+
+
+@router.post("/{slug}/edit")
+def edit_conversational(slug: str, body: ConversationalEditRequest) -> list[IngestResult]:
+    """대화식 편집 — 지시/추가 내용을 위키에 병합. (해당 프로젝트로 직행, 라우팅 없음)"""
+    if not body.message.strip():
+        raise HTTPException(400, "내용이 비어 있습니다.")
+    try:
+        return ingest_service.run_ingest(text=body.message, project_slug=slug)
+    except Exception as e:
+        raise HTTPException(500, f"수정 실패: {e}")

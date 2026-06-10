@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS documents (
     project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     title       TEXT NOT NULL,
     content_md  TEXT NOT NULL,
+    meta        JSONB NOT NULL DEFAULT '[]'::jsonb,   -- 프로젝트 메타/거버넌스 [{label,value}]
+    categories  JSONB NOT NULL DEFAULT '[]'::jsonb,   -- 카테고리 분류 [string]
     source_type TEXT NOT NULL DEFAULT 'nl',   -- 마지막 업데이트 소스: nl | paste | image | file
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),

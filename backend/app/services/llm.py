@@ -64,14 +64,39 @@ MERGE_TOOL = {
                 "type": "string",
                 "description": "내용이 속한 프로젝트 이름. 알려진 목록에 있으면 그 이름을 정확히, 없으면 가장 적절한 신규 프로젝트 이름.",
             },
+            "meta": {
+                "type": "array",
+                "description": (
+                    "프로젝트 핵심 정보/거버넌스. 위키 상단에 표시됨. 값을 '아는 항목만' 넣는다. "
+                    "모르는 항목은 그 항목 자체를 넣지 말 것(빈 값·'UNKNOWN'·'미정'·'-' 같은 플레이스홀더 금지). "
+                    "권장 label: 고객사, 사업기간, 사업규모, 계약형태, 상태/단계, 담당(PM/팀), 핵심목표, 인력규모. 기존 meta 값은 보존하되 새 정보로 갱신."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string"},
+                        "value": {"type": "string"},
+                    },
+                    "required": ["label", "value"],
+                },
+            },
             "content_md": {
                 "type": "string",
                 "description": (
-                    "프로젝트 위키 '전체' 본문(마크다운). 기존 본문에 새 정보를 자연스럽게 병합한 갱신본 전체를 반환한다. "
-                    "기존 내용은 보존하되, 같은 항목이 갱신되면 최신으로 바꾸고 변경/추가된 사실에는 문장 끝에 `(YYYY-MM-DD 수정)` 또는 `(YYYY-MM-DD 추가)` 표기를 붙여 명시한다. "
-                    "주제별 섹션(##)으로 구조화한다. 별도의 변경이력 섹션은 만들지 않는다(수정 이력은 시스템이 따로 관리). "
-                    "명백한 OCR/오타(깨진 글자)는 자연스러운 한국어로 교정하되, 숫자·날짜·금액·고유명사의 값은 보존한다."
+                    "프로젝트 위키 '진행 내용' 본문(마크다운). 메타(고객사/기간/규모 등)는 여기 중복하지 말 것(meta 필드에). "
+                    "진행 내용을 카테고리별로 `## 카테고리명` 섹션으로 묶고, 각 섹션 안에서는 '시간순(오래된→최신)'으로 정렬한다. "
+                    "각 항목 끝에 가능한 날짜(`(M/D)` 또는 `(YYYY-MM-DD)`)를 붙이고, 이번에 변경/추가된 항목에는 `(YYYY-MM-DD 수정)`·`(YYYY-MM-DD 추가)` 표기를 붙인다. "
+                    "기존 내용은 보존하되 같은 항목이 갱신되면 최신으로 바꾼다. 별도 변경이력 섹션은 만들지 않는다. "
+                    "명백한 OCR/오타는 교정하되 숫자·날짜·금액·고유명사 값은 보존한다."
                 ),
+            },
+            "categories": {
+                "type": "array",
+                "description": (
+                    "content_md 에서 사용한 카테고리(분류) 목록. 표준 후보: 영업/계약, 기획/설계, 개발, 테스트/QA, 보고/커뮤니케이션, 운영/오픈, 이슈/리스크, 기타. "
+                    "적합하면 표준을 쓰고, 필요하면 프로젝트에 맞는 카테고리를 추가한다."
+                ),
+                "items": {"type": "string"},
             },
             "change_summary": {
                 "type": "string",
@@ -102,15 +127,17 @@ MERGE_TOOL = {
                 },
             },
         },
-        "required": ["project_name", "content_md", "change_summary", "entities", "relations"],
+        "required": ["project_name", "meta", "content_md", "categories", "change_summary", "entities", "relations"],
     },
 }
 
 
-def merge(existing_md: str, new_text: str, known_projects: list[str], today: str, hinted_project: str | None) -> dict:
+def merge(existing_md: str, new_text: str, known_projects: list[str], today: str,
+          hinted_project: str | None, existing_meta: list | None = None) -> dict:
     hint = f"\n사용자가 지정한 프로젝트: {hinted_project} (이 프로젝트로 귀속)." if hinted_project else ""
     known = ", ".join(known_projects) if known_projects else "(없음)"
     existing_block = existing_md.strip() or "(아직 위키 없음 — 새로 작성)"
+    meta_block = json.dumps(existing_meta, ensure_ascii=False) if existing_meta else "(없음)"
     resp = client().messages.create(
         model=settings.anthropic_model,
         max_tokens=8192,
@@ -120,10 +147,11 @@ def merge(existing_md: str, new_text: str, known_projects: list[str], today: str
             "role": "user",
             "content": (
                 f"오늘 날짜: {today}\n알려진 프로젝트: {known}{hint}\n\n"
-                f"=== 기존 프로젝트 위키 본문 ===\n{existing_block}\n\n"
+                f"=== 기존 프로젝트 메타 ===\n{meta_block}\n\n"
+                f"=== 기존 위키 진행내용 본문 ===\n{existing_block}\n\n"
                 f"=== 새로 들어온 입력 ===\n{new_text}\n\n"
-                "위 새 입력을 기존 위키 본문에 병합해 '전체 갱신본'을 만들고, 변경/추가 사실에 날짜 표기를 붙여라. "
-                "이번 변경 요약과 온톨로지(엔티티/관계)도 추출하라."
+                "위 새 입력을 기존 위키에 병합해 '전체 갱신본'을 만든다. "
+                "프로젝트 핵심정보는 meta 로, 진행내용은 카테고리별·시간순으로 content_md 에 정리하고, 사용한 카테고리 목록과 변경 요약, 온톨로지를 추출하라."
             ),
         }],
     )
@@ -131,6 +159,46 @@ def merge(existing_md: str, new_text: str, known_projects: list[str], today: str
         if block.type == "tool_use" and block.name == "update_project_wiki":
             return block.input
     raise RuntimeError("위키 병합 실패")
+
+
+ANALYZE_TOOL = {
+    "name": "analyze_wiki",
+    "description": "주어진 위키 본문에서 카테고리 분류와 온톨로지(엔티티/관계)를 추출한다. 본문은 수정하지 않는다.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "categories": {"type": "array", "items": {"type": "string"},
+                           "description": "본문 섹션의 카테고리 분류 목록 (영업/계약, 개발, 테스트/QA 등)."},
+            "entities": {
+                "type": "array",
+                "items": {"type": "object", "properties": {
+                    "name": {"type": "string"}, "type": {"type": "string"}}, "required": ["name", "type"]},
+            },
+            "relations": {
+                "type": "array",
+                "items": {"type": "object", "properties": {
+                    "subject": {"type": "string"}, "predicate": {"type": "string"}, "object": {"type": "string"}},
+                    "required": ["subject", "predicate", "object"]},
+            },
+        },
+        "required": ["categories", "entities", "relations"],
+    },
+}
+
+
+def analyze(content_md: str) -> dict:
+    """수동 편집된 본문에서 카테고리/온톨로지만 재추출 (본문 자체는 건드리지 않음)."""
+    resp = client().messages.create(
+        model=settings.anthropic_model,
+        max_tokens=4096,
+        tools=[ANALYZE_TOOL],
+        tool_choice={"type": "tool", "name": "analyze_wiki"},
+        messages=[{"role": "user", "content": f"다음 위키 본문에서 카테고리와 온톨로지를 추출하라:\n\n{content_md}"}],
+    )
+    for block in resp.content:
+        if block.type == "tool_use" and block.name == "analyze_wiki":
+            return block.input
+    return {"categories": [], "entities": [], "relations": []}
 
 
 ROUTE_TOOL = {

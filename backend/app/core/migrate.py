@@ -35,6 +35,9 @@ DDL = [
     )""",
     # 기존(구 스키마) documents 에 빠진 컬럼이 있으면 추가 — 데이터 유지
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    # 구조화 위키: 메타(거버넌스) + 카테고리 분류
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS categories JSONB NOT NULL DEFAULT '[]'::jsonb",
     "CREATE INDEX IF NOT EXISTS idx_documents_project ON documents(project_id)",
 
     """CREATE TABLE IF NOT EXISTS revisions (

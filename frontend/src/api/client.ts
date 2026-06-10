@@ -23,10 +23,17 @@ export interface Relation {
   object: string
 }
 
+export interface MetaItem {
+  label: string
+  value: string
+}
+
 export interface WikiDoc {
   id: number
   title: string
   content_md: string
+  meta: MetaItem[]
+  categories: string[]
   source_type: string
   created_at: string
   updated_at: string
@@ -74,6 +81,10 @@ export const projectsApi = {
     entities: Entity[]
     relations: Relation[]
   }>(`/projects/${slug}`),
+  editDocument: (slug: string, content_md: string, meta: MetaItem[]) =>
+    api.put(`/projects/${slug}/document`, { content_md, meta }),
+  editConversational: (slug: string, message: string) =>
+    api.post<IngestResult[]>(`/projects/${slug}/edit`, { message }),
 }
 
 export const ingestApi = {

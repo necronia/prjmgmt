@@ -12,6 +12,20 @@ class SearchRequest(BaseModel):
     project_slug: str | None = None
 
 
+class MetaItem(BaseModel):
+    label: str
+    value: str
+
+
+class ManualEditRequest(BaseModel):
+    content_md: str
+    meta: list[MetaItem] = []
+
+
+class ConversationalEditRequest(BaseModel):
+    message: str
+
+
 # ── Responses ─────────────────────────────────────────
 class Project(BaseModel):
     id: int
@@ -38,6 +52,8 @@ class WikiDoc(BaseModel):
     id: int
     title: str
     content_md: str
+    meta: list[MetaItem] = []
+    categories: list[str] = []
     source_type: str
     created_at: str
     updated_at: str

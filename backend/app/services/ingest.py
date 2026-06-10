@@ -7,6 +7,7 @@
 """
 from datetime import date
 
+from psycopg.types.json import Json
 from slugify import slugify
 
 from ..core.db import get_conn
@@ -15,6 +16,19 @@ from . import embed, extract_files, llm
 
 # (filename, content_type, data) 튜플
 FileInput = tuple[str, str | None, bytes]
+
+_META_PLACEHOLDERS = {"", "-", "n/a", "na", "unknown", "<unknown>", "미정", "없음", "tbd", "?"}
+
+
+def _clean_meta(meta: list | None) -> list:
+    """값이 비었거나 플레이스홀더인 메타 항목 제거."""
+    out = []
+    for m in meta or []:
+        label = (m.get("label") or "").strip()
+        value = (m.get("value") or "").strip()
+        if label and value and value.lower() not in _META_PLACEHOLDERS:
+            out.append({"label": label, "value": value})
+    return out
 
 
 def _chunk(text: str, size: int = 800) -> list[str]:
@@ -120,59 +134,77 @@ def run_ingest(text: str | None = None, files: list[FileInput] | None = None,
 def _merge_segment(conn, project: dict, content: str, source_type: str, today: str) -> str:
     """확정된 프로젝트의 단일 위키에 content 를 병합하고 change_summary 반환."""
     pre_doc = conn.execute("SELECT * FROM documents WHERE project_id = %s", (project["id"],)).fetchone()
-    merged = llm.merge(pre_doc["content_md"] if pre_doc else "", content, [project["name"]], today, project["name"])
+    merged = llm.merge(
+        pre_doc["content_md"] if pre_doc else "", content, [project["name"]], today, project["name"],
+        existing_meta=pre_doc["meta"] if pre_doc else None,
+    )
 
     title = project["name"]
     content_md = merged.get("content_md") or content
+    meta = _clean_meta(merged.get("meta") or (pre_doc["meta"] if pre_doc else []))
+    categories = merged.get("categories") or []
     occurred = (merged.get("occurred_on") or "").strip() or today
     change_summary = (merged.get("change_summary") or "내용 업데이트").strip()
 
     # 단일 문서 upsert
     if pre_doc:
         doc = conn.execute(
-            """UPDATE documents SET content_md = %s, title = %s, source_type = %s, updated_at = now()
+            """UPDATE documents SET content_md = %s, meta = %s, categories = %s, title = %s,
+                      source_type = %s, updated_at = now()
                WHERE id = %s RETURNING *""",
-            (content_md, title, source_type, pre_doc["id"]),
+            (content_md, Json(meta), Json(categories), title, source_type, pre_doc["id"]),
         ).fetchone()
         conn.execute("DELETE FROM chunks WHERE document_id = %s", (doc["id"],))
     else:
         doc = conn.execute(
-            """INSERT INTO documents (project_id, title, content_md, source_type)
-               VALUES (%s, %s, %s, %s) RETURNING *""",
-            (project["id"], title, content_md, source_type),
+            """INSERT INTO documents (project_id, title, content_md, meta, categories, source_type)
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING *""",
+            (project["id"], title, content_md, Json(meta), Json(categories), source_type),
         ).fetchone()
 
-    # 청크 재임베딩
-    chunks = _chunk(content_md)
-    vectors = embed.embed_passages(chunks)
-    for ch, vec in zip(chunks, vectors):
-        vlit = "[" + ",".join(repr(float(x)) for x in vec) + "]"
-        conn.execute(
-            "INSERT INTO chunks (document_id, project_id, text, embedding) VALUES (%s, %s, %s, %s::vector)",
-            (doc["id"], project["id"], ch, vlit),
-        )
-
-    # 수정 이력 1건 기록
-    conn.execute(
-        """INSERT INTO revisions (project_id, document_id, summary, source_type, occurred_on)
-           VALUES (%s, %s, %s, %s, %s)""",
-        (project["id"], doc["id"], change_summary, source_type, occurred),
-    )
-
-    # 온톨로지 누적 upsert
-    for e in merged.get("entities", []):
-        _upsert_entity(conn, project["id"], e["name"], e.get("type", "unknown"))
-    for r in merged.get("relations", []):
-        subj = _upsert_entity(conn, project["id"], r["subject"], "unknown")
-        obj = _upsert_entity(conn, project["id"], r["object"], "unknown")
-        conn.execute(
-            """INSERT INTO relations (project_id, subject_id, predicate, object_id, document_id)
-               VALUES (%s, %s, %s, %s, %s)""",
-            (project["id"], subj, r["predicate"], obj, doc["id"]),
-        )
+    reindex_chunks(conn, doc["id"], project["id"], content_md, meta)
+    add_revision(conn, project["id"], doc["id"], change_summary, source_type, occurred)
+    set_ontology(conn, project["id"], doc["id"], merged.get("entities", []), merged.get("relations", []))
 
     conn.execute("UPDATE projects SET updated_at = now() WHERE id = %s", (project["id"],))
     return change_summary
+
+
+def reindex_chunks(conn, doc_id: int, project_id: int, content_md: str, meta: list | None = None) -> None:
+    """문서 청크를 재생성해 재임베딩 (검색 반영). 메타(고객사/규모 등)도 검색되도록 포함."""
+    conn.execute("DELETE FROM chunks WHERE document_id = %s", (doc_id,))
+    meta_line = " · ".join(f"{m.get('label')}: {m.get('value')}" for m in (meta or []) if m.get("value"))
+    full = (f"프로젝트 정보 — {meta_line}\n\n{content_md}") if meta_line else content_md
+    chunks = _chunk(full)
+    for ch, vec in zip(chunks, embed.embed_passages(chunks)):
+        vlit = "[" + ",".join(repr(float(x)) for x in vec) + "]"
+        conn.execute(
+            "INSERT INTO chunks (document_id, project_id, text, embedding) VALUES (%s, %s, %s, %s::vector)",
+            (doc_id, project_id, ch, vlit),
+        )
+
+
+def add_revision(conn, project_id: int, doc_id: int, summary: str, source_type: str, occurred: str | None) -> None:
+    conn.execute(
+        "INSERT INTO revisions (project_id, document_id, summary, source_type, occurred_on) VALUES (%s,%s,%s,%s,%s)",
+        (project_id, doc_id, summary, source_type, occurred),
+    )
+
+
+def set_ontology(conn, project_id: int, doc_id: int, entities: list, relations: list, replace: bool = False) -> None:
+    """엔티티/관계 반영. replace=True 면 프로젝트의 기존 온톨로지를 지우고 새로 구성(수동 편집용)."""
+    if replace:
+        conn.execute("DELETE FROM relations WHERE project_id = %s", (project_id,))
+        conn.execute("DELETE FROM entities WHERE project_id = %s", (project_id,))
+    for e in entities:
+        _upsert_entity(conn, project_id, e["name"], e.get("type", "unknown"))
+    for r in relations:
+        subj = _upsert_entity(conn, project_id, r["subject"], "unknown")
+        obj = _upsert_entity(conn, project_id, r["object"], "unknown")
+        conn.execute(
+            "INSERT INTO relations (project_id, subject_id, predicate, object_id, document_id) VALUES (%s,%s,%s,%s,%s)",
+            (project_id, subj, r["predicate"], obj, doc_id),
+        )
 
 
 def _build_result(conn, project: dict, changes: list[str], today: str) -> IngestResult:
@@ -189,6 +221,7 @@ def _build_result(conn, project: dict, changes: list[str], today: str) -> Ingest
     return IngestResult(
         document={
             "id": doc["id"], "title": doc["title"], "content_md": doc["content_md"],
+            "meta": doc["meta"], "categories": doc["categories"],
             "source_type": doc["source_type"],
             "created_at": doc["created_at"].isoformat(),
             "updated_at": doc["updated_at"].isoformat(),
@@ -202,3 +235,33 @@ def _build_result(conn, project: dict, changes: list[str], today: str) -> Ingest
         entities=[{"id": e["id"], "name": e["name"], "type": e["type"]} for e in ents],
         relations=[{"subject": r["subject"], "predicate": r["predicate"], "object": r["object"]} for r in rels],
     )
+
+
+def manual_edit(slug: str, content_md: str, meta: list) -> None:
+    """위키 본문/메타를 사용자가 직접 수정. 카테고리·온톨로지·검색 인덱스를 재반영."""
+    today = date.today().isoformat()
+    with get_conn() as conn:
+        project = conn.execute("SELECT * FROM projects WHERE slug = %s", (slug,)).fetchone()
+        if not project:
+            raise ValueError("프로젝트를 찾을 수 없습니다.")
+        info = llm.analyze(content_md)  # 카테고리 + 온톨로지 재추출 (본문은 사용자 것 유지)
+        categories = info.get("categories", [])
+        meta = _clean_meta(meta)
+        doc = conn.execute("SELECT * FROM documents WHERE project_id = %s", (project["id"],)).fetchone()
+        if doc:
+            doc = conn.execute(
+                """UPDATE documents SET content_md=%s, meta=%s, categories=%s, source_type='edit', updated_at=now()
+                   WHERE id=%s RETURNING *""",
+                (content_md, Json(meta), Json(categories), doc["id"]),
+            ).fetchone()
+        else:
+            doc = conn.execute(
+                """INSERT INTO documents (project_id, title, content_md, meta, categories, source_type)
+                   VALUES (%s,%s,%s,%s,%s,'edit') RETURNING *""",
+                (project["id"], project["name"], content_md, Json(meta), Json(categories)),
+            ).fetchone()
+        reindex_chunks(conn, doc["id"], project["id"], content_md, meta)
+        set_ontology(conn, project["id"], doc["id"], info.get("entities", []), info.get("relations", []), replace=True)
+        add_revision(conn, project["id"], doc["id"], "수동 편집", "edit", today)
+        conn.execute("UPDATE projects SET updated_at = now() WHERE id = %s", (project["id"],))
+        conn.commit()
