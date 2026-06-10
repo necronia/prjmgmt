@@ -102,4 +102,22 @@ export const searchApi = {
     api.post<SearchResult>('/search', { query: q, project_slug }),
 }
 
+export interface ReviewItem {
+  id: number
+  project_id: number | null
+  project_name: string | null
+  project_slug: string | null
+  kind: string
+  context: string | null
+  question: string
+  created_at: string
+}
+
+export const reviewsApi = {
+  list: () => api.get<ReviewItem[]>('/reviews'),
+  count: () => api.get<{ count: number }>('/reviews/count'),
+  resolve: (id: number, answer?: string) => api.post(`/reviews/${id}/resolve`, { answer }),
+  dismiss: (id: number) => api.post(`/reviews/${id}/dismiss`),
+}
+
 export default api

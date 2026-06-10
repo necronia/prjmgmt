@@ -104,6 +104,21 @@ MERGE_TOOL = {
                 "type": "string",
                 "description": "사용자가 '프로젝트 이름/제목 자체'를 변경·교정하라고 명시적으로 지시했을 때만 새 프로젝트 이름을 넣는다(예: '오상공장을 오산공장으로 고쳐줘'). 그 외에는 빈 문자열.",
             },
+            "clarifications": {
+                "type": "array",
+                "description": (
+                    "OCR 깨짐/오타로 의미를 확신할 수 없어 '사용자 확인이 필요한' 부분만 나열한다. "
+                    "확실히 이해되는 내용은 절대 넣지 마라. 주로 깨진 고유명사·숫자·약어. 없으면 빈 배열."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "context": {"type": "string", "description": "문제가 된 원문 조각(깨진 표현 포함)"},
+                        "question": {"type": "string", "description": "무엇이 맞는지 사용자에게 물을 질문"},
+                    },
+                    "required": ["context", "question"],
+                },
+            },
             "change_summary": {
                 "type": "string",
                 "description": "이번 입력으로 추가/변경된 핵심을 1~3줄로 요약 (수정 이력에 기록됨).",
@@ -185,6 +200,13 @@ ANALYZE_TOOL = {
                 "items": {"type": "object", "properties": {
                     "subject": {"type": "string"}, "predicate": {"type": "string"}, "object": {"type": "string"}},
                     "required": ["subject", "predicate", "object"]},
+            },
+            "clarifications": {
+                "type": "array",
+                "description": "OCR 깨짐/오타로 의미가 불확실해 사용자 확인이 필요한 부분만. 확실한 건 제외. 없으면 빈 배열.",
+                "items": {"type": "object", "properties": {
+                    "context": {"type": "string"}, "question": {"type": "string"}},
+                    "required": ["context", "question"]},
             },
         },
         "required": ["categories", "entities", "relations"],

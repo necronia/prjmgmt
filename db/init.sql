@@ -78,3 +78,18 @@ CREATE TABLE IF NOT EXISTS relations (
 CREATE INDEX IF NOT EXISTS idx_relations_project ON relations(project_id);
 CREATE INDEX IF NOT EXISTS idx_relations_subject ON relations(subject_id);
 CREATE INDEX IF NOT EXISTS idx_relations_object ON relations(object_id);
+
+-- ── 확인 필요(AI가 못 알아들은/불확실한 것) 함 ─────────
+CREATE TABLE IF NOT EXISTS review_items (
+    id          SERIAL PRIMARY KEY,
+    project_id  INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+    document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    kind        TEXT NOT NULL DEFAULT 'clarify',   -- clarify | unknown
+    context     TEXT,                               -- 문제가 된 원문 조각
+    question    TEXT NOT NULL,                      -- 사용자에게 물을 질문
+    status      TEXT NOT NULL DEFAULT 'open',       -- open | resolved | dismissed
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_review_status ON review_items(status);
+CREATE INDEX IF NOT EXISTS idx_review_project ON review_items(project_id);

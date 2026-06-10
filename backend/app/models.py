@@ -97,3 +97,18 @@ class Citation(BaseModel):
 class SearchResponse(BaseModel):
     answer: str
     citations: list[Citation]
+
+
+class ReviewItem(BaseModel):
+    id: int
+    project_id: int | None = None
+    project_name: str | None = None
+    project_slug: str | None = None
+    kind: str
+    context: str | None = None
+    question: str
+    created_at: str
+
+
+class ResolveReviewRequest(BaseModel):
+    answer: str | None = None

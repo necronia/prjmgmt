@@ -187,6 +187,7 @@ def _merge_segment(conn, project: dict, content: str, source_type: str, today: s
     reindex_chunks(conn, doc["id"], project["id"], content_md, meta)
     add_revision(conn, project["id"], doc["id"], change_summary, source_type, occurred)
     set_ontology(conn, project["id"], doc["id"], merged.get("entities", []), merged.get("relations", []))
+    add_clarifications(conn, project["id"], doc["id"], merged.get("clarifications"))
 
     conn.execute("UPDATE projects SET updated_at = now() WHERE id = %s", (project["id"],))
     return change_summary
@@ -203,6 +204,26 @@ def reindex_chunks(conn, doc_id: int, project_id: int, content_md: str, meta: li
         conn.execute(
             "INSERT INTO chunks (document_id, project_id, text, embedding) VALUES (%s, %s, %s, %s::vector)",
             (doc_id, project_id, ch, vlit),
+        )
+
+
+def add_clarifications(conn, project_id: int, doc_id: int, clarifications: list | None) -> None:
+    """AI가 불확실해한 항목을 '확인 필요' 함에 적재 (열린 동일 질문은 중복 방지)."""
+    for c in clarifications or []:
+        if not isinstance(c, dict):
+            continue
+        q = (c.get("question") or "").strip()
+        ctx = (c.get("context") or "").strip()
+        if not q:
+            continue
+        dup = conn.execute(
+            "SELECT 1 FROM review_items WHERE project_id=%s AND question=%s AND status='open'", (project_id, q)
+        ).fetchone()
+        if dup:
+            continue
+        conn.execute(
+            "INSERT INTO review_items (project_id, document_id, kind, context, question) VALUES (%s,%s,'clarify',%s,%s)",
+            (project_id, doc_id, ctx, q),
         )
 
 
@@ -287,6 +308,7 @@ def manual_edit(slug: str, content_md: str, meta: list, name: str | None = None)
             ).fetchone()
         reindex_chunks(conn, doc["id"], project["id"], content_md, meta)
         set_ontology(conn, project["id"], doc["id"], info.get("entities", []), info.get("relations", []), replace=True)
+        add_clarifications(conn, project["id"], doc["id"], info.get("clarifications"))
         add_revision(conn, project["id"], doc["id"], "수동 편집", "edit", today)
         conn.execute("UPDATE projects SET updated_at = now() WHERE id = %s", (project["id"],))
         conn.commit()

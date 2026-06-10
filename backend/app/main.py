@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .core import migrate
 from .core.config import settings
-from .routers import ingest, projects, search
+from .routers import ingest, projects, reviews, search
 from .services import embed
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +23,7 @@ app.add_middleware(
 app.include_router(projects.router)
 app.include_router(ingest.router)
 app.include_router(search.router)
+app.include_router(reviews.router)
 
 
 @app.on_event("startup")
