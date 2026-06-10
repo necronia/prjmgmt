@@ -26,6 +26,7 @@ export default function ProjectWiki() {
 
   const load = () => {
     if (!slug) return
+    setMode(null)  // 프로젝트 이동 시 편집 모드/초안 초기화
     setLoading(true)
     projectsApi.get(slug)
       .then((r) => {
