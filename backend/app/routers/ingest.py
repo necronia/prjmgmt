@@ -10,6 +10,7 @@ router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 async def ingest(
     text: str | None = Form(None),
     project_slug: str | None = Form(None),
+    urls: list[str] = Form(default=[]),
     files: list[UploadFile] = File(default=[]),
 ) -> list[IngestResult]:
     file_inputs = []
@@ -18,7 +19,7 @@ async def ingest(
         if data:
             file_inputs.append((f.filename or "file", f.content_type, data))
     try:
-        return run_ingest(text=text, files=file_inputs, project_slug=project_slug)
+        return run_ingest(text=text, files=file_inputs, project_slug=project_slug, urls=urls)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:

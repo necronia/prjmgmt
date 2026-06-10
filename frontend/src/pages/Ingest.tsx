@@ -3,7 +3,7 @@ import { useSearchParams, Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
-  Loader2, Sparkles, Paperclip, X, ArrowRight, UploadCloud,
+  Loader2, Sparkles, Paperclip, X, ArrowRight, UploadCloud, Link2, Plus,
   FileText, Image as ImageIcon, FileSpreadsheet, Presentation, File as FileIcon,
 } from 'lucide-react'
 import { ingestApi, projectsApi, type IngestResult, type Project } from '../api/client'
@@ -30,6 +30,8 @@ export default function Ingest() {
   const [projectSlug, setProjectSlug] = useState(params.get('project') ?? '')
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
+  const [urls, setUrls] = useState<string[]>([])
+  const [urlInput, setUrlInput] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState<IngestResult[]>([])
@@ -43,6 +45,15 @@ export default function Ingest() {
     if (arr.length) setFiles((prev) => [...prev, ...arr])
   }
   const removeFile = (i: number) => setFiles((prev) => prev.filter((_, idx) => idx !== i))
+
+  const addUrl = () => {
+    const u = urlInput.trim()
+    if (!u) return
+    const norm = /^https?:\/\//i.test(u) ? u : `https://${u}`
+    if (!urls.includes(norm)) setUrls((prev) => [...prev, norm])
+    setUrlInput('')
+  }
+  const removeUrl = (i: number) => setUrls((prev) => prev.filter((_, idx) => idx !== i))
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)
@@ -66,16 +77,18 @@ export default function Ingest() {
   }
 
   const submit = async () => {
-    if (!text.trim() && files.length === 0) return
+    const allUrls = urlInput.trim() ? [...urls, urlInput.trim()] : urls
+    if (!text.trim() && files.length === 0 && allUrls.length === 0) return
     setLoading(true); setError(null); setResults([])
     try {
       const r = await ingestApi.submit({
         text: text.trim() || undefined,
         project_slug: projectSlug || undefined,
         files,
+        urls: allUrls,
       })
       setResults(r.data)
-      setText(''); setFiles([])
+      setText(''); setFiles([]); setUrls([]); setUrlInput('')
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? '처리 중 오류가 발생했습니다.')
     } finally {
@@ -130,13 +143,32 @@ export default function Ingest() {
           />
         </div>
 
-        {/* 첨부 목록 */}
-        {files.length > 0 && (
+        {/* 링크 추가 */}
+        <div className="mt-3">
+          <div className="flex gap-2">
+            <div className="flex items-center gap-2 input flex-1">
+              <Link2 size={15} className="text-ax-muted flex-shrink-0" />
+              <input
+                className="flex-1 bg-transparent outline-none text-sm"
+                placeholder="링크 붙여넣기 (웹페이지 · 구글 드라이브/문서 · Tiro 공유 등)"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addUrl())}
+              />
+            </div>
+            <button className="btn-secondary btn-md flex-shrink-0" onClick={addUrl} disabled={!urlInput.trim()}>
+              <Plus size={15} /> 추가
+            </button>
+          </div>
+        </div>
+
+        {/* 첨부 목록 (파일 + 링크) */}
+        {(files.length > 0 || urls.length > 0) && (
           <div className="mt-3 space-y-1.5">
             {files.map((f, i) => {
               const Icon = fileIcon(f.name)
               return (
-                <div key={i} className="flex items-center gap-2 panel-flat px-3 py-2">
+                <div key={`f${i}`} className="flex items-center gap-2 panel-flat px-3 py-2">
                   <Icon size={15} className="text-ax-accent flex-shrink-0" />
                   <span className="text-sm text-ax-text truncate flex-1">{f.name}</span>
                   <span className="text-[11px] text-ax-muted flex-shrink-0">{humanSize(f.size)}</span>
@@ -146,6 +178,15 @@ export default function Ingest() {
                 </div>
               )
             })}
+            {urls.map((u, i) => (
+              <div key={`u${i}`} className="flex items-center gap-2 panel-flat px-3 py-2">
+                <Link2 size={15} className="text-ax-accent flex-shrink-0" />
+                <span className="text-sm text-ax-text truncate flex-1">{u}</span>
+                <button onClick={() => removeUrl(i)} className="text-ax-muted hover:text-ax-danger flex-shrink-0">
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
           </div>
         )}
 
@@ -153,14 +194,14 @@ export default function Ingest() {
           <button className="btn-ghost btn-sm" onClick={() => fileRef.current?.click()}>
             <Paperclip size={14} /> 파일 첨부
           </button>
-          <button className="btn-primary btn-md" onClick={submit} disabled={loading || (!text.trim() && files.length === 0)}>
+          <button className="btn-primary btn-md" onClick={submit} disabled={loading || (!text.trim() && files.length === 0 && urls.length === 0 && !urlInput.trim())}>
             {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-            {files.length > 1 ? `${files.length}개 정리해서 추가` : '정리해서 추가'}
+            정리해서 추가
           </button>
         </div>
         {error && <div className="mt-3 text-sm text-ax-danger">{error}</div>}
-        {loading && files.length > 0 && (
-          <div className="mt-2 text-xs text-ax-muted">파일을 읽고 정리하는 중입니다… (파일 수에 따라 시간이 걸릴 수 있어요)</div>
+        {loading && (files.length > 0 || urls.length > 0) && (
+          <div className="mt-2 text-xs text-ax-muted">파일/링크를 읽고 정리하는 중입니다… (개수에 따라 시간이 걸릴 수 있어요)</div>
         )}
       </div>
 

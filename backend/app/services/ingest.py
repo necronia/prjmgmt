@@ -12,7 +12,7 @@ from slugify import slugify
 
 from ..core.db import get_conn
 from ..models import IngestResult
-from . import embed, extract_files, llm
+from . import embed, extract_files, fetch_url, llm
 
 # (filename, content_type, data) 튜플
 FileInput = tuple[str, str | None, bytes]
@@ -104,25 +104,36 @@ def _upsert_entity(conn, project_id: int, name: str, etype: str) -> int:
 
 
 def run_ingest(text: str | None = None, files: list[FileInput] | None = None,
-               project_slug: str | None = None) -> list[IngestResult]:
+               project_slug: str | None = None, urls: list[str] | None = None) -> list[IngestResult]:
     note = (text or "").strip()
     files = files or []
+    urls = [u.strip() for u in (urls or []) if u.strip()]
+    prefix = f"[사용자 메모]\n{note}\n\n" if note else ""
 
     # 입력 아이템 구성: (raw_text, source_type)
     items: list[tuple[str, str]] = []
-    if files:
-        for filename, content_type, data in files:
-            extracted, src = extract_files.extract_file(filename, content_type, data)
-            if not extracted.strip():
-                continue  # 추출 텍스트 없음(예: 스캔 PDF) → 건너뜀
-            header = f"[파일: {filename}]"
-            prefix = f"[사용자 메모]\n{note}\n\n" if note else ""
-            items.append((f"{prefix}{header}\n{extracted}", src))
-    elif note:
+    failed_urls: list[tuple[str, str]] = []
+    for filename, content_type, data in files:
+        extracted, src = extract_files.extract_file(filename, content_type, data)
+        if not extracted.strip():
+            continue  # 추출 텍스트 없음(예: 스캔 PDF) → 건너뜀
+        items.append((f"{prefix}[파일: {filename}]\n{extracted}", src))
+    for url in urls:
+        try:
+            extracted = fetch_url.fetch_url(url)
+            if extracted.strip():
+                items.append((f"{prefix}[링크: {url}]\n{extracted}", "link"))
+            else:
+                failed_urls.append((url, "내용이 비어 있음"))
+        except Exception as e:  # noqa: BLE001
+            failed_urls.append((url, str(e)[:200]))
+    if not files and not urls and note:
         items.append((note, "paste" if len(note) > 400 else "nl"))
 
     if not items:
-        raise ValueError("처리할 입력이 없습니다. 텍스트를 쓰거나 읽을 수 있는 파일을 첨부하세요.")
+        if failed_urls:
+            raise ValueError("링크를 읽지 못했습니다: " + "; ".join(f"{u} ({e})" for u, e in failed_urls))
+        raise ValueError("처리할 입력이 없습니다. 텍스트를 쓰거나 파일/링크를 첨부하세요.")
 
     today = date.today().isoformat()
     affected: dict[int, dict] = {}
@@ -146,6 +157,13 @@ def run_ingest(text: str | None = None, files: list[FileInput] | None = None,
                 known = list({*known, project["name"]})  # 같은 배치 후속 라우팅에 반영
                 info = affected.setdefault(project["id"], {"project": project, "changes": []})
                 info["changes"].append(change_summary)
+
+        # 읽지 못한 링크는 '확인 필요' 함에 기록 (forced 프로젝트가 있으면 그 프로젝트로)
+        for url, err in failed_urls:
+            add_clarifications(conn, forced["id"] if forced else None, None, [{
+                "context": url,
+                "question": f"이 링크를 읽지 못했습니다 ({err}). 공유 권한을 확인하거나 내용을 직접 넣어주세요: {url}",
+            }])
 
         conn.commit()
         return [_build_result(conn, info["project"], info["changes"], today) for info in affected.values()]
