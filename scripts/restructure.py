@@ -11,7 +11,7 @@ from psycopg.types.json import Json
 
 from app.core.db import get_conn
 from app.services import llm
-from app.services.ingest import add_revision, reindex_chunks, set_ontology
+from app.services.ingest import _clean_meta, add_revision, reindex_chunks, set_ontology
 
 apply = "--apply" in sys.argv[1:]
 today = date.today().isoformat()
@@ -24,7 +24,7 @@ with get_conn() as conn:
     for r in rows:
         # 기존 본문을 '새 입력'으로 넣어 구조화본을 생성 (기존 구조 없음)
         s = llm.merge("", r["content_md"], [r["name"]], today, r["name"])
-        meta = s.get("meta") or []
+        meta = _clean_meta(s.get("meta") or [])
         categories = s.get("categories") or []
         content_md = s.get("content_md") or r["content_md"]
 

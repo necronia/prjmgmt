@@ -17,17 +17,23 @@ from . import embed, extract_files, llm
 # (filename, content_type, data) 튜플
 FileInput = tuple[str, str | None, bytes]
 
-_META_PLACEHOLDERS = {"", "-", "n/a", "na", "unknown", "<unknown>", "미정", "없음", "tbd", "?"}
+# 값 모름을 뜻하는 표현들 → '미상' 으로 정규화 (항목 자체는 유지)
+_UNKNOWN_SYNONYMS = {"-", "n/a", "na", "unknown", "<unknown>", "미정", "tbd", "?", "미상"}
 
 
 def _clean_meta(meta: list | None) -> list:
-    """값이 비었거나 플레이스홀더인 메타 항목 제거."""
+    """빈 라벨/값 항목만 제거. 값 모름 표현은 '미상' 으로 통일(항목은 유지)."""
     out = []
     for m in meta or []:
+        if not isinstance(m, dict):
+            continue
         label = (m.get("label") or "").strip()
         value = (m.get("value") or "").strip()
-        if label and value and value.lower() not in _META_PLACEHOLDERS:
-            out.append({"label": label, "value": value})
+        if not label or not value:
+            continue
+        if value.lower() in _UNKNOWN_SYNONYMS:
+            value = "미상"
+        out.append({"label": label, "value": value})
     return out
 
 
