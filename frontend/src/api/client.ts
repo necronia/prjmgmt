@@ -81,8 +81,8 @@ export const projectsApi = {
     entities: Entity[]
     relations: Relation[]
   }>(`/projects/${slug}`),
-  editDocument: (slug: string, content_md: string, meta: MetaItem[]) =>
-    api.put(`/projects/${slug}/document`, { content_md, meta }),
+  editDocument: (slug: string, content_md: string, meta: MetaItem[], name?: string) =>
+    api.put<{ ok: boolean; slug: string }>(`/projects/${slug}/document`, { content_md, meta, name }),
   editConversational: (slug: string, message: string) =>
     api.post<IngestResult[]>(`/projects/${slug}/edit`, { message }),
 }

@@ -76,6 +76,20 @@ def _resolve_project(conn, project_slug: str | None, project_name: str) -> dict:
     ).fetchone()
 
 
+def _rename_project(conn, project: dict, new_name: str) -> dict:
+    """프로젝트 이름 변경 — name/slug/문서 title 갱신. 갱신된 project dict 반환."""
+    new_name = (new_name or "").strip()
+    if not new_name or new_name == project["name"]:
+        return project
+    base = slugify(new_name) or project["slug"]
+    slug, i = base, 2
+    while conn.execute("SELECT 1 FROM projects WHERE slug=%s AND id<>%s", (slug, project["id"])).fetchone():
+        slug = f"{base}-{i}"; i += 1
+    conn.execute("UPDATE projects SET name=%s, slug=%s, updated_at=now() WHERE id=%s", (new_name, slug, project["id"]))
+    conn.execute("UPDATE documents SET title=%s WHERE project_id=%s", (new_name, project["id"]))
+    return {**project, "name": new_name, "slug": slug}
+
+
 def _upsert_entity(conn, project_id: int, name: str, etype: str) -> int:
     canonical = name.strip().lower()
     row = conn.execute(
@@ -145,6 +159,8 @@ def _merge_segment(conn, project: dict, content: str, source_type: str, today: s
         existing_meta=pre_doc["meta"] if pre_doc else None,
     )
 
+    if merged.get("rename_to"):
+        project = _rename_project(conn, project, merged["rename_to"])
     title = project["name"]
     content_md = merged.get("content_md") or content
     meta = _clean_meta(merged.get("meta") or (pre_doc["meta"] if pre_doc else []))
@@ -214,6 +230,7 @@ def set_ontology(conn, project_id: int, doc_id: int, entities: list, relations: 
 
 
 def _build_result(conn, project: dict, changes: list[str], today: str) -> IngestResult:
+    project = conn.execute("SELECT * FROM projects WHERE id = %s", (project["id"],)).fetchone()  # 리네임 반영
     doc = conn.execute("SELECT * FROM documents WHERE project_id = %s", (project["id"],)).fetchone()
     ents = conn.execute(
         "SELECT id, name, type FROM entities WHERE project_id = %s ORDER BY name", (project["id"],)
@@ -243,13 +260,15 @@ def _build_result(conn, project: dict, changes: list[str], today: str) -> Ingest
     )
 
 
-def manual_edit(slug: str, content_md: str, meta: list) -> None:
-    """위키 본문/메타를 사용자가 직접 수정. 카테고리·온톨로지·검색 인덱스를 재반영."""
+def manual_edit(slug: str, content_md: str, meta: list, name: str | None = None) -> str:
+    """위키 본문/메타(+이름)를 사용자가 직접 수정. 카테고리·온톨로지·검색 인덱스를 재반영. 새 slug 반환."""
     today = date.today().isoformat()
     with get_conn() as conn:
         project = conn.execute("SELECT * FROM projects WHERE slug = %s", (slug,)).fetchone()
         if not project:
             raise ValueError("프로젝트를 찾을 수 없습니다.")
+        if name and name.strip() and name.strip() != project["name"]:
+            project = _rename_project(conn, project, name)
         info = llm.analyze(content_md)  # 카테고리 + 온톨로지 재추출 (본문은 사용자 것 유지)
         categories = info.get("categories", [])
         meta = _clean_meta(meta)
@@ -271,3 +290,4 @@ def manual_edit(slug: str, content_md: str, meta: list) -> None:
         add_revision(conn, project["id"], doc["id"], "수동 편집", "edit", today)
         conn.execute("UPDATE projects SET updated_at = now() WHERE id = %s", (project["id"],))
         conn.commit()
+        return project["slug"]

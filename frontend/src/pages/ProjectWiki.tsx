@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -10,6 +10,7 @@ import { projectsApi, type WikiDoc, type Revision, type Entity, type Relation, t
 
 export default function ProjectWiki() {
   const { slug } = useParams<{ slug: string }>()
+  const navigate = useNavigate()
   const [project, setProject] = useState<Project | null>(null)
   const [doc, setDoc] = useState<WikiDoc | null>(null)
   const [revisions, setRevisions] = useState<Revision[]>([])
@@ -18,6 +19,7 @@ export default function ProjectWiki() {
   const [loading, setLoading] = useState(true)
 
   const [mode, setMode] = useState<null | 'manual' | 'chat'>(null)
+  const [draftName, setDraftName] = useState('')
   const [draftContent, setDraftContent] = useState('')
   const [draftMeta, setDraftMeta] = useState<MetaItem[]>([])
   const [saving, setSaving] = useState(false)
@@ -41,6 +43,7 @@ export default function ProjectWiki() {
   useEffect(load, [slug])
 
   const openManual = () => {
+    setDraftName(project?.name ?? '')
     setDraftContent(doc?.content_md ?? '')
     setDraftMeta(doc?.meta ?? [])
     setMode('manual')
@@ -49,18 +52,21 @@ export default function ProjectWiki() {
     if (!slug) return
     setSaving(true)
     try {
-      await projectsApi.editDocument(slug, draftContent, draftMeta.filter((m) => m.label || m.value))
+      const r = await projectsApi.editDocument(slug, draftContent, draftMeta.filter((m) => m.label || m.value), draftName.trim())
       setMode(null)
-      load()
+      if (r.data.slug && r.data.slug !== slug) navigate(`/projects/${r.data.slug}`)
+      else load()
     } finally { setSaving(false) }
   }
   const sendChat = async () => {
     if (!slug || !chatMsg.trim()) return
     setChatBusy(true)
     try {
-      await projectsApi.editConversational(slug, chatMsg.trim())
+      const r = await projectsApi.editConversational(slug, chatMsg.trim())
       setChatMsg(''); setMode(null)
-      load()
+      const newSlug = r.data?.[0]?.project?.slug
+      if (newSlug && newSlug !== slug) navigate(`/projects/${newSlug}`)
+      else load()
     } finally { setChatBusy(false) }
   }
 
@@ -103,7 +109,7 @@ export default function ProjectWiki() {
             <input
               autoFocus
               className="input flex-1"
-              placeholder="예) 사업기간을 7월까지로 바꿔줘 / 테스트 5차 완료로 업데이트"
+              placeholder="예) 사업기간을 7월까지로 / 테스트 5차 완료 / 프로젝트 이름을 '오산공장'으로 고쳐줘"
               value={chatMsg}
               onChange={(e) => setChatMsg(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && sendChat()}
@@ -125,6 +131,10 @@ export default function ProjectWiki() {
       ) : mode === 'manual' ? (
         /* 수동 편집기 */
         <div className="panel p-6 space-y-4">
+          <div>
+            <div className="section-title mb-2">프로젝트 이름</div>
+            <input className="input" value={draftName} onChange={(e) => setDraftName(e.target.value)} placeholder="프로젝트 이름" />
+          </div>
           <div>
             <div className="flex items-center gap-2 section-title mb-2"><Info size={15} /> 프로젝트 정보 (메타)</div>
             <div className="space-y-2">

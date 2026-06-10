@@ -20,6 +20,7 @@ class MetaItem(BaseModel):
 class ManualEditRequest(BaseModel):
     content_md: str
     meta: list[MetaItem] = []
+    name: str | None = None
 
 
 class ConversationalEditRequest(BaseModel):

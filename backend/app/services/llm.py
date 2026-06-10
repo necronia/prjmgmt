@@ -100,6 +100,10 @@ MERGE_TOOL = {
                 ),
                 "items": {"type": "string"},
             },
+            "rename_to": {
+                "type": "string",
+                "description": "사용자가 '프로젝트 이름/제목 자체'를 변경·교정하라고 명시적으로 지시했을 때만 새 프로젝트 이름을 넣는다(예: '오상공장을 오산공장으로 고쳐줘'). 그 외에는 빈 문자열.",
+            },
             "change_summary": {
                 "type": "string",
                 "description": "이번 입력으로 추가/변경된 핵심을 1~3줄로 요약 (수정 이력에 기록됨).",

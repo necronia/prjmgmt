@@ -96,8 +96,8 @@ def get_project(slug: str) -> ProjectDetail:
 def edit_document(slug: str, body: ManualEditRequest):
     """수동 편집 — 본문/메타를 직접 저장. 카테고리·온톨로지·검색 인덱스 재반영."""
     try:
-        ingest_service.manual_edit(slug, body.content_md, [m.model_dump() for m in body.meta])
-        return {"ok": True}
+        new_slug = ingest_service.manual_edit(slug, body.content_md, [m.model_dump() for m in body.meta], body.name)
+        return {"ok": True, "slug": new_slug}
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
